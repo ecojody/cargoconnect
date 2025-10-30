@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cargo Connect - Peer-to-Peer Delivery</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#4f46e5',
+                        'secondary': '#f97316',
+                        'background': '#fefefe',
+                        'card-bg': '#ffffff',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .container-box {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .tab-button.active {
+            border-bottom: 3px solid #4f46e5;
+            color: #4f46e5;
+            font-weight: 600;
+        }
+        .trip-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .trip-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+        /* Modal Backdrop */
+        .modal-backdrop {
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="fixed inset-0 bg-gray-100/70 backdrop-blur-sm flex items-center justify-center z-50">
+        <div class="text-xl font-semibold text-primary flex items-center">
+            <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Connecting to Cargo Connect...
+        </div>
+    </div>
+
+    <header class="text-center mb-8">
+        <h1 class="text-4xl font-extrabold text-gray-900 flex items-center justify-center">
+            <svg class="w-8 h-8 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+            Cargo Connect
+        </h1>
+        <p class="text-gray-500 mt-1">Connecting planned journeys with delivery needs.</p>
+        <!-- User Info & Notification Status & Logout -->
+        <div class="flex flex-col sm:flex-row justify-center items-center mt-2 space-y-2 sm:space-y-0 sm:space-x-4">
+            <p id="user-info" class="text-sm text-gray-400"></p>
+            <button id="enable-notifications-btn" onclick="requestNotificationPermissionAndToken()" class="text-xs font-semibold py-1 px-3 bg-red-100 text-red-600 rounded-full hover:bg-red-200 transition duration-150 hidden">
+                Enable Notifications
+            </button>
+            <p id="notification-status" class="text-xs text-green-600 hidden">Notifications Status...</p>
+            <button id="logout-btn" onclick="handleLogout()" class="text-xs font-semibold py-1 px-3 bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 transition duration-150 hidden">
+                Logout
+            </button>
+        </div>
+    </header>
+
+    <main id="main-content" class="max-w-4xl mx-auto container-box bg-card-bg rounded-xl p-6 md:p-10 hidden">
+        <!-- Tab Navigation -->
+        <div class="flex border-b border-gray-200 mb-6">
+            <button id="tab-post" class="tab-button active flex-1 py-3 text-lg transition duration-150" onclick="setView('post')">Post a Trip</button>
+            <button id="tab-search" class="tab-button flex-1 py-3 text-lg transition duration-150" onclick="setView('search')">Find Deliveries</button>
+            <button id="tab-messages" class="tab-button flex-1 py-3 text-lg transition duration-150" onclick="setView('messages')">My Messages (<span id="unread-count">0</span>)</button>
+        </div>
+
+        <!-- 1. Post Trip Content -->
+        <div id="content-post" class="view-content">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-5">Offer Your Cargo Space</h2>
+            <form id="post-trip-form" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="col-span-full">
+                    <label for="origin" class="block text-sm font-medium text-gray-700">Origin City, State (Required Format)</label>
+                    <input type="text" id="origin" name="origin" required 
+                           pattern="^[\w\s.-]+,\s*[A-Za-z]{2}$" 
+                           title="Please use the format: City, State Abbreviation (e.g., Louisville, KY)"
+                           placeholder="e.g., Louisville, KY" 
+                           list="city-suggestions"
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary">
+                </div>
+                <div class="col-span-full">
+                    <label for="destination" class="block text-sm font-medium text-gray-700">Destination City, State (Required Format)</label>
+                    <input type="text" id="destination" name="destination" required 
+                           pattern="^[\w\s.-]+,\s*[A-Za-z]{2}$" 
+                           title="Please use the format: City, State Abbreviation (e.g., New York, NY)"
+                           placeholder="e.g., New York, NY" 
+                           list="city-suggestions"
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary">
+                </div>
+                <div>
+                    <label for="departureDate" class="block text-sm font-medium text-gray-700">Departure Date</label>
+                    <input type="date" id="departureDate" name="departureDate" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary">
+                </div>
+                <div>
+                    <label for="returnDate" class="block text-sm font-medium text-gray-700">Return Date (Optional)</label>
+                    <input type="date" id="returnDate" name="returnDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary">
+                </div>
+                <div>
+                    <label for="cargoCapacity" class="block text-sm font-medium text-gray-700">Available Cargo Space</label>
+                    <select id="cargoCapacity" name="cargoCapacity" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary bg-white">
+                        <option value="">Select capacity...</option>
+                        <option value="Envelope/Small Box">Envelope/Small Box</option>
+                        <option value="Medium Parcel">Medium Parcel (Suitcase size)</option>
+                        <option value="Large Item">Large Item (Coffee table size)</option>
+                        <option value="Full Trunk/Seat">Full Trunk/Seat</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="price" class="block text-sm font-medium text-gray-700">Delivery Cost (USD)</label>
+                    <input type="number" id="price" name="price" required min="1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary">
+                </div>
+
+                <!-- NEW: Accept Route Drops Checkbox -->
+                <div class="col-span-full flex items-center mt-2">
+                    <input type="checkbox" id="acceptsRouteDrops" name="acceptsRouteDrops" class="h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                    <label for="acceptsRouteDrops" class="ml-2 block text-sm font-medium text-gray-700">
+                        Accept deliveries to **any destination** along my route.
+                    </label>
+                </div>
+
+                <div class="col-span-full mt-4">
+                    <button type="submit" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-secondary hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary transition duration-150">
+                        Post My Trip
+                    </button>
+                    <p id="post-message" class="mt-3 text-center text-sm"></p>
+                </div>
+            </form>
+        </div>
+
+        <!-- 2. Search Trip Content -->
+        <div id="content-search" class="view-content hidden">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-5">Search Available Trips</h2>
+
+            <!-- Search Filters -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <input type="text" id="search-origin" placeholder="Search Origin (e.g., Louisville, KY)" 
+                       list="city-suggestions"
+                       class="rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary">
+                <input type="text" id="search-destination" placeholder="Search Destination (e.g., New York, NY)" 
+                       list="city-suggestions"
+                       class="rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary">
+                <button onclick="applyFilters()" class="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition duration-150">
+                    Apply Filters
+                </button>
+            </div>
+
+            <!-- Trip Results -->
+            <div id="trip-results">
+                <p class="text-center text-gray-500">Loading available trips...</p>
+            </div>
+        </div>
+
+        <!-- 3. My Messages Content -->
+        <div id="content-messages" class="view-content hidden">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-5">Your Inquiries</h2>
+            <div id="message-results">
+                <p class="text-center text-gray-500">Awaiting messages...</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- City Suggestions Datalist -->
+    <datalist id="city-suggestions">
+        <option value="New York, NY">
+        <option value="Los Angeles, CA">
+        <option value="Chicago, IL">
+        <option value="Houston, TX">
+        <option value="Phoenix, AZ">
+        <option value="Philadelphia, PA">
+        <option value="San Antonio, TX">
+        <option value="San Diego, CA">
+        <option value="Dallas, TX">
+        <option value="San Jose, CA">
+        <option value="Austin, TX">
+        <option value="Jacksonville, FL">
+        <option value="Louisville, KY">
+        <option value="Denver, CO">
+        <option value="Seattle, WA">
+        <option value="Miami, FL">
+        <option value="Boston, MA">
+        <option value="Atlanta, GA">
+        <option value="Las Vegas, NV">
+        <option value="Portland, OR">
+    </datalist>
+
+    <!-- Contact Modal (for sending inquiries) -->
+    <div id="message-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50" onclick="closeMessageModal(event)">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6" onclick="event.stopPropagation()">
+            <h3 class="text-xl font-bold text-gray-800 mb-4">Contact Carrier</h3>
+            <p id="modal-trip-summary" class="text-sm text-gray-600 mb-4 font-semibold"></p>
+
+            <form id="contact-form">
+                <input type="hidden" id="modal-carrier-id">
+                <input type="hidden" id="modal-trip-id">
+
+                <div class="mb-4">
+                    <label for="senderContact" class="block text-sm font-medium text-gray-700">Your Contact (Email or Phone)</label>
+                    <input type="text" id="senderContact" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary" placeholder="e.g., shipper@email.com or 555-123-4567">
+                </div>
+                <div class="mb-4">
+                    <label for="messageText" class="block text-sm font-medium text-gray-700">Your Inquiry Message</label>
+                    <textarea id="messageText" rows="4" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary" placeholder="Hi! I need to ship a coffee table... Is your capacity enough?"></textarea>
+                </div>
+
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="closeMessageModal()" class="py-2 px-4 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition duration-150">Cancel</button>
+                    <button type="submit" class="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-indigo-700 transition duration-150">Send Inquiry</button>
+                </div>
+                <p id="modal-message-status" class="mt-3 text-center text-sm"></p>
+            </form>
+        </div>
+    </div>
+    
+    <!-- NEW: Login/Registration Modal -->
+    <div id="auth-modal" class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop hidden">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-8">
+            <h3 class="text-2xl font-bold text-primary mb-6 text-center" id="auth-title">Log In</h3>
+            
+            <form id="auth-form">
+                <div class="mb-4">
+                    <label for="auth-email" class="block text-sm font-medium text-gray-700">Email Address</label>
+                    <input type="email" id="auth-email" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary" placeholder="you@example.com">
+                </div>
+                <div class="mb-6">
+                    <label for="auth-password" class="block text-sm font-medium text-gray-700">Password</label>
+                    <input type="password" id="auth-password" required minlength="6" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 border focus:ring-primary focus:border-primary" placeholder="Minimum 6 characters">
+                </div>
+                
+                <button type="submit" id="auth-submit-btn" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-secondary hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary transition duration-150">
+                    Log In
+                </button>
+                
+                <p id="auth-message" class="mt-4 text-center text-sm text-red-600"></p>
+            </form>
+            
+            <div class="mt-6 text-center">
+                <button onclick="toggleAuthMode()" class="text-sm font-medium text-primary hover:text-indigo-700 transition duration-150">
+                    <span id="auth-toggle-text">Need an account? **Register**</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Firebase Imports and Script -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, onAuthStateChanged, signOut, 
+            createUserWithEmailAndPassword, signInWithEmailAndPassword 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, addDoc, onSnapshot, collection, query, serverTimestamp, updateDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // NOTE: Custom token/anonymous sign-in methods are removed for production deployment.
+
+        // Global Firebase variables
+        // NOTE: In a real deployment, you would replace these placeholders with your actual Firebase config object.
+        const appId = 'cargo-connect-prod'; // Placeholder ID for production
+        // The firebaseConfig variable is assumed to be defined by the environment or replaced by the user's config.
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
+
+        let db, auth, userId = null;
+        let allTrips = []; 
+        let allMessages = []; 
+        let isAuthReady = false;
+        let isRegisterMode = false; // State for Auth Modal
+
+        /**
+         * Initializes Firebase and handles user authentication.
+         */
+        async function initializeFirebase() {
+            try {
+                if (Object.keys(firebaseConfig).length === 0) {
+                    console.error("Firebase config not found. You need to provide your actual config in production.");
+                    // In the actual deployed app, the user will replace __firebase_config with their own.
+                    // For running in this environment without a custom token, we use a basic init if config exists.
+                    if (typeof __firebase_config === 'undefined' || JSON.parse(__firebase_config).projectId === undefined) {
+                         // Fallback for extreme environment conditions where no config is present
+                         document.getElementById('loading-screen').classList.add('hidden');
+                         document.getElementById('auth-modal').classList.remove('hidden');
+                         document.getElementById('auth-message').textContent = 'Please register or login to use the marketplace.';
+                         return;
+                    }
+                }
+
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // 1. Handle Authentication State Changes (REPLACES custom/anonymous sign-in)
+                onAuthStateChanged(auth, async (user) => {
+                    document.getElementById('loading-screen').classList.add('hidden');
+                    
+                    if (user) {
+                        userId = user.uid;
+                        document.getElementById('user-info').textContent = `User: ${user.email}`;
+                        isAuthReady = true;
+                        
+                        // Show main content and hide auth modal
+                        document.getElementById('main-content').classList.remove('hidden');
+                        document.getElementById('auth-modal').classList.add('hidden');
+                        document.getElementById('logout-btn').classList.remove('hidden');
+                        document.getElementById('enable-notifications-btn').classList.remove('hidden');
+
+                        // Start listeners once authenticated
+                        listenForTrips();
+                        listenForMessages();
+
+                    } else {
+                        userId = null;
+                        isAuthReady = false;
+                        document.getElementById('user-info').textContent = 'Please Log In';
+                        
+                        // Hide main content and show auth modal
+                        document.getElementById('main-content').classList.add('hidden');
+                        document.getElementById('auth-modal').classList.remove('hidden');
+                        document.getElementById('logout-btn').classList.add('hidden');
+                        document.getElementById('enable-notifications-btn').classList.add('hidden');
+                        
+                        // Clear data
+                        allTrips = [];
+                        allMessages = [];
+                        renderTrips([]);
+                        renderMessages();
+                    }
+                });
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+                document.getElementById('loading-screen').classList.add('hidden');
+            }
+        }
+        
+        // --- AUTHENTICATION LOGIC ---
+
+        window.toggleAuthMode = function() {
+            isRegisterMode = !isRegisterMode;
+            document.getElementById('auth-title').textContent = isRegisterMode ? 'Register New Account' : 'Log In';
+            document.getElementById('auth-submit-btn').textContent = isRegisterMode ? 'Register' : 'Log In';
+            document.getElementById('auth-toggle-text').innerHTML = isRegisterMode ? 'Already have an account? **Log In**' : 'Need an account? **Register**';
+            document.getElementById('auth-message').textContent = '';
+        }
+
+        async function handleAuth(event) {
+            event.preventDefault();
+            const authMessageEl = document.getElementById('auth-message');
+            authMessageEl.textContent = 'Processing...';
+
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+
+            try {
+                if (isRegisterMode) {
+                    await createUserWithEmailAndPassword(auth, email, password);
+                    authMessageEl.textContent = 'Registration successful! You are now logged in.';
+                    // onAuthStateChanged will handle UI update
+                } else {
+                    await signInWithEmailAndPassword(auth, email, password);
+                    authMessageEl.textContent = 'Login successful!';
+                    // onAuthStateChanged will handle UI update
+                }
+            } catch (error) {
+                console.error("Auth Error:", error);
+                let message = 'An error occurred.';
+                if (error.code === 'auth/email-already-in-use') {
+                    message = 'This email is already in use. Try logging in.';
+                } else if (error.code === 'auth/invalid-credential') {
+                     message = 'Invalid email or password.';
+                } else if (error.code === 'auth/weak-password') {
+                    message = 'Password should be at least 6 characters.';
+                } else if (error.code === 'auth/network-request-failed') {
+                    message = 'Network error. Check your connection.';
+                }
+                authMessageEl.textContent = message;
+            }
+        }
+        
+        window.handleLogout = async function() {
+            try {
+                await signOut(auth);
+                // onAuthStateChanged will handle UI cleanup
+            } catch (error) {
+                console.error("Logout Error:", error);
+            }
+        }
+        
+        // --- NOTIFICATION LOGIC (Placeholder for mobile setup) ---
+
+        /**
+         * Placeholder for the notification request. Explains why it can't fully run here.
+         */
+        window.requestNotificationPermissionAndToken = async function() {
+            // NOTE: Full Firebase Cloud Messaging (FCM) requires external setup.
+            const statusEl = document.getElementById('notification-status');
+            const buttonEl = document.getElementById('enable-notifications-btn');
+
+            buttonEl.classList.add('hidden');
+            statusEl.classList.remove('hidden');
+            statusEl.classList.remove('text-green-600');
+            statusEl.classList.add('text-orange-600');
+            statusEl.textContent = "Push Notifications need external server/VAPID key setup (Feature Disabled). In-app messaging is working.";
+        }
+
+
+        // --- UTILITIES ---
+
+        function formatDate(dateString) {
+            if (!dateString) return 'N/A';
+            try {
+                const date = new Date(dateString + 'T00:00:00'); 
+                return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+            } catch (e) {
+                console.error("Invalid date string:", dateString);
+                return dateString;
+            }
+        }
+
+        // --- CORE UI/DATA FUNCTIONS ---
+
+        function renderTrips(trips) {
+            const resultsEl = document.getElementById('trip-results');
+            resultsEl.innerHTML = '';
+
+            if (trips.length === 0) {
+                resultsEl.innerHTML = '<p class="text-center text-gray-500 p-8 border-2 border-dashed border-gray-300 rounded-lg">No trips currently match your search criteria. Try posting your own trip!</p>';
+                return;
+            }
+
+            trips.sort((a, b) => new Date(a.departureDate) - new Date(b.departureDate));
+
+            trips.forEach(trip => {
+                const card = document.createElement('div');
+                card.className = 'trip-card p-5 border border-gray-200 bg-card-bg rounded-lg mb-4';
+                
+                const returnText = trip.returnDate ? `<span class="text-xs text-gray-500 ml-2"> (Return: ${formatDate(trip.returnDate)})</span>` : '';
+                
+                // Route Drop indicator
+                const routeDropText = trip.acceptsRouteDrops ? 
+                    `<p class="text-xs font-semibold text-primary/70 mt-1 flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 01.553-.894L9 2m7 18l5.447-2.724A1 1 0 0021 16.382V5.618a1 1 0 00-.553-.894L15 2m0 18V2M9 2v18"></path></svg>
+                        Accepts intermediate drop-offs on route
+                    </p>` : 
+                    '';
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <h3 class="text-xl font-bold text-gray-900">${trip.origin} <span class="text-primary text-xl mx-2">&rarr;</span> ${trip.destination}</h3>
+                            <p class="text-sm font-medium text-gray-600 mt-1">
+                                Departs: <span class="text-secondary">${formatDate(trip.departureDate)}</span>${returnText}
+                            </p>
+                            ${routeDropText}
+                        </div>
+                        <div class="text-right">
+                            <p class="text-2xl font-extrabold text-green-600">\$${trip.price}</p>
+                        </div>
+                    </div>
+                    <div class="mt-3 pt-3 border-t border-gray-100 flex justify-between items-end">
+                        <div class="text-sm text-gray-700">
+                            Capacity: <span class="font-semibold">${trip.cargoCapacity}</span>
+                        </div>
+                        ${trip.carrierId !== userId ? 
+                        `<button onclick="openMessageModal('${trip.id}', '${trip.carrierId}', '${trip.origin}', '${trip.destination}', '${formatDate(trip.departureDate)}')" 
+                                class="py-2 px-3 border border-transparent rounded-md shadow-sm text-xs font-medium text-white bg-primary hover:bg-indigo-700 transition duration-150">
+                            Contact Carrier
+                        </button>` :
+                        `<button disabled class="py-2 px-3 border border-gray-300 rounded-md text-xs font-medium text-gray-500 bg-gray-100 cursor-not-allowed">
+                            Your Trip
+                        </button>`}
+                    </div>
+                `;
+                resultsEl.appendChild(card);
+            });
+        }
+
+        function renderMessages() {
+            const resultsEl = document.getElementById('message-results');
+            resultsEl.innerHTML = '';
+
+            const unreadCount = allMessages.filter(m => !m.read).length;
+            document.getElementById('unread-count').textContent = unreadCount;
+            
+            if (allMessages.length === 0) {
+                resultsEl.innerHTML = '<p class="text-center text-gray-500 p-8 border-2 border-dashed border-gray-300 rounded-lg">You have no delivery inquiries yet.</p>';
+                return;
+            }
+
+            allMessages.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+
+            allMessages.forEach(msg => {
+                const isUnread = !msg.read;
+                const card = document.createElement('div');
+                card.id = `msg-${msg.id}`;
+                card.className = `p-4 border border-gray-200 bg-card-bg rounded-lg mb-3 ${isUnread ? 'bg-indigo-50 border-indigo-300' : 'bg-white'}`;
+                
+                const time = msg.timestamp ? new Date(msg.timestamp.toDate()).toLocaleString() : 'N/A';
+                
+                card.innerHTML = `
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-sm font-bold ${isUnread ? 'text-indigo-800' : 'text-gray-900'}">${isUnread ? 'NEW INQUIRY' : 'Read Inquiry'} about trip: ${msg.tripOrigin} &rarr; ${msg.tripDestination}</span>
+                        <span class="text-xs text-gray-500">${time}</span>
+                    </div>
+                    <p class="text-sm text-gray-700 mb-3">${msg.messageText}</p>
+                    <div class="pt-2 border-t border-gray-100 flex justify-between items-end">
+                        <p class="text-xs text-gray-600">Contact: <span class="font-semibold text-secondary">${msg.senderContact}</span> (Sender ID: ${msg.senderId.substring(0, 8)}...)</p>
+                        ${isUnread ? 
+                            `<button onclick="markAsRead('${msg.id}')" class="py-1 px-3 border border-transparent rounded-md shadow-sm text-xs font-medium text-white bg-green-500 hover:bg-green-600 transition duration-150">
+                                Mark as Read
+                            </button>` : 
+                            ''
+                        }
+                    </div>
+                `;
+                resultsEl.appendChild(card);
+            });
+        }
+
+
+        // --- FIREBASE LISTENERS ---
+
+        function listenForTrips() {
+            if (!db || !isAuthReady) return;
+
+            const tripsColRef = collection(db, `artifacts/${appId}/public/data/trips`);
+            const q = query(tripsColRef);
+
+            onSnapshot(q, (snapshot) => {
+                allTrips = [];
+                snapshot.forEach((doc) => {
+                    allTrips.push({ id: doc.id, ...doc.data() });
+                });
+                console.log("Trips loaded:", allTrips.length);
+                applyFilters(); 
+            }, (error) => {
+                console.error("Error fetching trips: ", error);
+                document.getElementById('trip-results').innerHTML = '<p class="text-center text-red-500">Error loading trips. Please check console.</p>';
+            });
+        }
+
+        function listenForMessages() {
+            if (!db || !isAuthReady || !userId) return;
+            
+            const messagesColRef = collection(db, `artifacts/${appId}/users/${userId}/messages`);
+            const q = query(messagesColRef);
+
+            onSnapshot(q, (snapshot) => {
+                allMessages = [];
+                snapshot.forEach((doc) => {
+                    allMessages.push({ id: doc.id, ...doc.data() });
+                });
+                console.log("Messages loaded:", allMessages.length);
+                if (document.getElementById('content-messages').classList.contains('hidden') === false) {
+                    renderMessages();
+                }
+            }, (error) => {
+                console.error("Error fetching messages: ", error);
+                document.getElementById('message-results').innerHTML = '<p class="text-center text-red-500">Error loading messages. Please check console.</p>';
+            });
+        }
+
+
+        // --- FORM SUBMISSION & MESSAGE LOGIC ---
+
+        /**
+         * Filter logic is updated to account for trips that accept intermediate drop-offs.
+         */
+        window.applyFilters = function() {
+            if (!isAuthReady) return;
+            const originFilter = document.getElementById('search-origin').value.toLowerCase().trim();
+            const destinationFilter = document.getElementById('search-destination').value.toLowerCase().trim();
+
+            const filteredTrips = allTrips.filter(trip => {
+                const originMatch = !originFilter || trip.origin.toLowerCase().includes(originFilter);
+                const isFutureTrip = new Date(trip.departureDate) >= new Date(new Date().toDateString());
+                
+                // Destination Matching Logic:
+                let destinationMatches = false;
+
+                if (!destinationFilter) {
+                    // If no destination is searched, all trips matching origin/date are included.
+                    destinationMatches = true;
+                } else {
+                    // 1. Strict Match: Trip's final destination matches search query.
+                    const strictMatch = trip.destination.toLowerCase().includes(destinationFilter);
+                    
+                    // 2. Route Drop Match: Trip accepts intermediate drops, AND the search origin matches the trip origin.
+                    // This simulates finding a delivery on the way without complex geospatial API calls.
+                    const routeDropMatch = trip.acceptsRouteDrops && originMatch; 
+
+                    destinationMatches = strictMatch || routeDropMatch;
+                }
+
+                return originMatch && destinationMatches && isFutureTrip;
+            });
+
+            renderTrips(filteredTrips);
+        }
+
+        async function handlePostTrip(event) {
+            event.preventDefault();
+            const postMessageEl = document.getElementById('post-message');
+            postMessageEl.className = 'mt-3 text-center text-sm text-gray-500';
+            postMessageEl.textContent = 'Posting trip...';
+
+            const originValue = document.getElementById('origin').value.trim();
+            const destinationValue = document.getElementById('destination').value.trim();
+            const pattern = /^[\w\s.-]+,\s*[A-Za-z]{2}$/;
+
+            if (!pattern.test(originValue) || !pattern.test(destinationValue)) {
+                postMessageEl.textContent = 'Error: Please use the required "City, State" format (e.g., Louisville, KY).';
+                postMessageEl.className = 'mt-3 text-center text-sm text-red-600';
+                return;
+            }
+
+
+            if (!db || !userId) {
+                postMessageEl.textContent = 'Error: Please log in to post a trip.';
+                postMessageEl.className = 'mt-3 text-center text-sm text-red-600';
+                return;
+            }
+
+            const form = event.target;
+            const tripData = {
+                origin: originValue,
+                destination: destinationValue,
+                departureDate: form.departureDate.value,
+                returnDate: form.returnDate.value || null,
+                cargoCapacity: form.cargoCapacity.value,
+                price: parseFloat(form.price.value),
+                carrierId: userId,
+                timestamp: serverTimestamp(),
+                acceptsRouteDrops: form.acceptsRouteDrops.checked // Store the new flag
+            };
+            
+            if (new Date(tripData.departureDate) < new Date(new Date().toDateString())) {
+                postMessageEl.textContent = 'Error: Departure date cannot be in the past.';
+                postMessageEl.className = 'mt-3 text-center text-sm text-red-600';
+                return;
+            }
+
+            try {
+                const tripsColRef = collection(db, `artifacts/${appId}/public/data/trips`);
+                await addDoc(tripsColRef, tripData);
+
+                postMessageEl.textContent = 'Trip posted successfully! Check "Find Deliveries" tab.';
+                postMessageEl.className = 'mt-3 text-center text-sm text-green-600';
+                form.reset();
+            } catch (error) {
+                console.error("Error adding document: ", error);
+                postMessageEl.textContent = `Error posting trip: ${error.message}`;
+                postMessageEl.className = 'mt-3 text-center text-sm text-red-600';
+            }
+        }
+        
+        async function handleSendMessage(event) {
+            event.preventDefault();
+            const statusEl = document.getElementById('modal-message-status');
+            statusEl.textContent = 'Sending message...';
+            statusEl.className = 'mt-3 text-center text-sm text-gray-500';
+
+            const form = event.target;
+            const carrierId = form['modal-carrier-id'].value;
+            const tripId = form['modal-trip-id'].value;
+            
+            if (!db || !userId || !carrierId) {
+                statusEl.textContent = 'Error: You must be logged in to send a message.';
+                statusEl.className = 'mt-3 text-center text-sm text-red-600';
+                return;
+            }
+
+            const trip = allTrips.find(t => t.id === tripId);
+
+            const messageData = {
+                tripId: tripId,
+                carrierId: carrierId,
+                senderId: userId, 
+                senderContact: form.senderContact.value.trim(),
+                messageText: form.messageText.value.trim(),
+                tripOrigin: trip ? trip.origin : 'N/A',
+                tripDestination: trip ? trip.destination : 'N/A',
+                timestamp: serverTimestamp(),
+                read: false
+            };
+
+            try {
+                // Save message to the CARRIER's private message collection
+                const messagesColRef = collection(db, `artifacts/${appId}/users/${carrierId}/messages`);
+                await addDoc(messagesColRef, messageData);
+
+                statusEl.textContent = 'Message sent successfully! The carrier will contact you.';
+                statusEl.className = 'mt-3 text-center text-sm text-green-600';
+                
+                setTimeout(() => {
+                    form.reset();
+                    closeMessageModal();
+                }, 1500);
+
+            } catch (error) {
+                console.error("Error sending message: ", error);
+                statusEl.textContent = `Error sending message: ${error.message}`;
+                statusEl.className = 'mt-3 text-center text-sm text-red-600';
+            }
+        }
+        
+        window.markAsRead = async function(messageId) {
+            if (!db || !userId) return;
+
+            try {
+                const messageDocRef = doc(db, `artifacts/${appId}/users/${userId}/messages`, messageId);
+                await updateDoc(messageDocRef, { read: true });
+                console.log(`Message ${messageId} marked as read.`);
+                
+            } catch (error) {
+                console.error("Error marking message as read: ", error);
+            }
+        }
+
+        // --- MODAL CONTROLS ---
+
+        window.openMessageModal = function(tripId, carrierId, origin, destination, date) {
+            if (carrierId === userId) {
+                 // Carrier cannot contact themselves
+                 console.log("Cannot contact own trip.");
+                 return;
+            }
+            if (!userId) {
+                document.getElementById('auth-modal').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('modal-carrier-id').value = carrierId;
+            document.getElementById('modal-trip-id').value = tripId;
+            document.getElementById('modal-trip-summary').textContent = `Inquiry for trip: ${origin} to ${destination} on ${date}`;
+            document.getElementById('message-modal').classList.remove('hidden');
+            document.getElementById('modal-message-status').textContent = '';
+            document.getElementById('contact-form').reset();
+        }
+
+        window.closeMessageModal = function(event) {
+            if (!event || event.currentTarget.classList.contains('bg-opacity-50')) {
+                document.getElementById('message-modal').classList.add('hidden');
+            }
+        }
+
+
+        // --- GENERAL SETUP ---
+
+        window.setView = function(view) {
+            document.querySelectorAll('.view-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
+            
+            if (!userId) {
+                // Force user to log in if they try to change views while logged out
+                document.getElementById('auth-modal').classList.remove('hidden');
+                return;
+            }
+
+            if (view === 'post') {
+                document.getElementById('content-post').classList.remove('hidden');
+                document.getElementById('tab-post').classList.add('active');
+            } else if (view === 'search') {
+                document.getElementById('content-search').classList.remove('hidden');
+                document.getElementById('tab-search').classList.add('active');
+                applyFilters(); 
+            } else if (view === 'messages') {
+                document.getElementById('content-messages').classList.remove('hidden');
+                document.getElementById('tab-messages').classList.add('active');
+                renderMessages(); 
+            }
+        }
+
+        // Attach event listeners and initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeFirebase();
+            document.getElementById('post-trip-form').addEventListener('submit', handlePostTrip);
+            document.getElementById('contact-form').addEventListener('submit', handleSendMessage);
+            document.getElementById('auth-form').addEventListener('submit', handleAuth);
+        });
+
+        window.onload = () => setView('post');
+    </script>
+
+</body>
+</html>
