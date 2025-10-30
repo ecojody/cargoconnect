@@ -1,0 +1,35 @@
+# This workflow runs every time a new commit is pushed to the 'main' branch
+
+name: Cargo Connect Deployment Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_and_deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Check out the repository content
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Node.js (Required to run npm install)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Step 3: Install Firebase CLI (required for deployment command)
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      # Step 4: Run the deployment command
+      - name: Deploy to Firebase
+        run: firebase deploy --only hosting
+        env:
+          # This token must be set in your GitHub repository's secrets
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CARGOCONNECT }}
